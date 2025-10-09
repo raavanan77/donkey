@@ -1,0 +1,5 @@
+/build
+/resource
+.vscode
+*.o
+donkey
