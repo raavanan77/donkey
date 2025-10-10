@@ -27,6 +27,7 @@
 #define MAX_PATH_SIZE 128
 #define IMAGE_PATH "/var/lib/donkey/image/"
 #define CRATE_PATH "/var/lib/donkey/crate/"
+#define CGROUP_PATH "/sys/fs/cgroup/"
 
 typedef char* string;
 
@@ -35,8 +36,8 @@ enum COMMAND {
 };
 
 typedef struct rootfs{
-    char source[128];
-    char target[128];
+    char source[MAX_PATH_SIZE];
+    char target[MAX_PATH_SIZE];
     char overlaycat[1024];
 } rootfs;
 
@@ -50,7 +51,7 @@ typedef struct donkey_t{
     __pid_t pid;
 } donkey_t;
 
-int commandresolver(string args[], void* data);
+int commandresolver(int arg, string args[], void* data);
 int createcrate(string args[], struct donkey_t* data);
 int imageextractor(string filename);
 static int childfunc(void *arg);
@@ -62,31 +63,34 @@ int main(int argc, string argv[]){
         exit(EXIT_SUCCESS);
     }
     else{
-        if(commandresolver(argv, &carry) != 0) exit(EXIT_FAILURE);
+        if(commandresolver(argc, argv, &carry) != 0) exit(EXIT_FAILURE);
     }
+
+    // Fork a child
+    pid_t newspace = fork();
     
-    carry.stack = mmap(NULL, STACK_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
-    if(carry.stack == MAP_FAILED) err(EXIT_FAILURE, "MAP failed");
-    
-    carry.stacktop = carry.stack + STACK_SIZE;
-    
-    carry.pid = clone(childfunc, carry.stacktop, CLONE_NEWUTS | CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWIPC | SIGCHLD, &carry);
-    if(carry.pid == -1) err(EXIT_FAILURE, "clone");
-    
-    printf("clone returned %jd\n",(intmax_t)carry.pid);
-    
-    sleep(1);
-    
-    if(uname(&carry.uts) == -1) err(EXIT_FAILURE, "unmae");
-    //printf("UTS.nodename in chlid : %s\n", carry.uts.nodename);
-    
-    if(waitpid(carry.pid, NULL, 0) == -1) err(EXIT_FAILURE, "waitpid");
+    if(newspace == 0){
+        if(unshare(CLONE_NEWUTS | CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWIPC | CLONE_NEWCGROUP) != 0) err(EXIT_FAILURE, "unshare failed");
+        
+        carry.pid = fork();
+        if(carry.pid == 0){
+            childfunc(&carry);
+            exit(EXIT_SUCCESS);
+        }
+        waitpid(carry.pid, NULL, 0);
+        exit(EXIT_SUCCESS);
+    }
+    else if(carry.pid > 0){
+        printf("clone returned %jd\n",(intmax_t)carry.pid);
+        sleep(1);
+        if(uname(&carry.uts) == -1) err(EXIT_FAILURE, "unmae");
+        if(waitpid(newspace, NULL, 0) == -1) err(EXIT_FAILURE, "waitpid");
+    }
     printf("child is terminated\n");
-    
     exit(EXIT_SUCCESS);
 }
 
-int commandresolver(string args[], void* data){
+int commandresolver(int argc, string args[], void* data){
     if(strcmp(args[1], "image") == 0){
         if(imageextractor(args[2]) == 0){
             return 0;
@@ -94,8 +98,8 @@ int commandresolver(string args[], void* data){
     }
     else if(strcmp(args[1], "run") == 0){
         struct stat dir;
-        char path[128];
-        char props[128];
+        char path[MAX_PATH_SIZE];
+        char props[MAX_PATH_SIZE];
         sprintf(path, "%s%s", CRATE_PATH, args[2]);
 
         stat(path, &dir);
@@ -107,7 +111,7 @@ int commandresolver(string args[], void* data){
             int rc = fread(rdata, sizeof(struct donkey_t), 1, fs);
             printf("RC : %d\n", rc);
             if(rc > 0){
-                printf("Cratepath :%s\n", rdata->fs.target);
+                printf("propspath :%s\n", rdata->fs.target);
                 return 0;
             }
         }
@@ -137,17 +141,19 @@ int commandresolver(string args[], void* data){
     }
     else if(strcmp(args[1], "rm") == 0){
         struct stat dir;
-        char path[128];
-        sprintf(path, "%s%s", CRATE_PATH, args[2]);
-        stat(path, &dir);
-        if(S_ISDIR(dir.st_mode)){
-            sprintf(path, "rm -rf %s%s", CRATE_PATH, args[2]);
-            if(system(path) == -1) err(EXIT_FAILURE, "Unable to remove crate"); // Lazy work, I'll improve later
-            else{
-                printf("crate %s removed\n", args[2]);
-                exit(EXIT_SUCCESS);
+        char path[MAX_PATH_SIZE];
+        for(int i = 2; i < argc; i++){
+            sprintf(path, "%s%s", CRATE_PATH, args[i]);
+            stat(path, &dir);
+            if(S_ISDIR(dir.st_mode)){
+                sprintf(path, "rm -rf %s%s", CRATE_PATH, args[i]);
+                if(system(path) == -1) err(EXIT_FAILURE, "Unable to remove crate"); // Lazy work, I'll improve later
+                else{
+                    printf("crate %s removed\n", args[i]);
+                }
             }
         }
+        exit(EXIT_SUCCESS);
     }
     // else if(strcmp(args[1], "rmi") == 0){
     //     // call image extractor
@@ -189,17 +195,17 @@ int imageextractor(string filename){
 }
 
 int createcrate(string args[], struct donkey_t* data){
-    char upperpath[128];
-    char cratepath[128];
+    char upperdir[MAX_PATH_SIZE];
+    char propspath[MAX_PATH_SIZE];
     const char* upperdirs[3] = {"/diff", "/work", "/merged"};
     if(strcmp(args[2], "-name") == 0){
         if(strlen(args[3]) < 4) err(EXIT_FAILURE, "Crate name should be more than 3 letters");
         sprintf(data->fs.target, "%s%s", CRATE_PATH, args[3]);
-        sprintf(cratepath, "%s%s/props.txt", CRATE_PATH, args[3]);
+        sprintf(propspath, "%s%s/props.txt", CRATE_PATH, args[3]);
         if(mkdir(data->fs.target, 0777) != 0) err(EXIT_FAILURE, "Creating crate failed");
         for(int i = 0; i < 3; i++){
-            sprintf(upperpath, "%s%s", data->fs.target, upperdirs[i]);
-            if(mkdir(upperpath, 0755) != 0) err(EXIT_FAILURE, "Creating %s dir failed", upperpath);
+            sprintf(upperdir, "%s%s", data->fs.target, upperdirs[i]);
+            if(mkdir(upperdir, 0755) != 0) err(EXIT_FAILURE, "Creating %s dir failed", upperdir);
         }
         if(args[4] != NULL){
             sprintf(data->fs.source, "%s%s", IMAGE_PATH, args[4]);
@@ -207,9 +213,9 @@ int createcrate(string args[], struct donkey_t* data){
             sprintf(data->fs.overlaycat, "lowerdir=%s,upperdir=%s/diff,workdir=%s/work", data->fs.source, data->fs.target, data->fs.target);
             printf("source img path : %s crate path : %s\n", data->fs.source, data->fs.target);
         }   
-        strcpy(data->fs.target, upperpath);
+        strcpy(data->fs.target, upperdir);
         FILE *fs;
-        fs = fopen(cratepath, "w+");   
+        fs = fopen(propspath, "w+");   
         int rc = fwrite(data, sizeof(struct  donkey_t), 1, fs);
         fclose(fs);
         if(rc == 0) return 1;
@@ -220,13 +226,14 @@ int createcrate(string args[], struct donkey_t* data){
 static int childfunc(void *arg){
     struct donkey_t* crate = (struct donkey_t*)arg;
     struct stat dir;
+    char cgroupcrate[MAX_PATH_SIZE];
     int oldrootexists = 0;
-
+    
     // Setting hostname from arg
     if(sethostname(crate->hostname, strlen(crate->hostname)) == -1){
         err(EXIT_FAILURE, "sethostname");
     }
-
+    
     // get hostname
     if(uname(&crate->uts) == -1){
         err(EXIT_FAILURE, "uname");
@@ -246,7 +253,7 @@ static int childfunc(void *arg){
     stat("oldroot", &dir);
     if(S_ISDIR(dir.st_mode)) oldrootexists = 1;
     printf("OLD :%d\n", oldrootexists);
-
+    
     // make dir for oldroot
     if(oldrootexists == 0){
         if(mkdir("oldroot", 777) == -1) err(EXIT_FAILURE, "mkdir oldroot failed");
@@ -254,14 +261,16 @@ static int childfunc(void *arg){
     
     // pivot_root Change new file system as root '/'
     if(syscall(SYS_pivot_root, ".", "oldroot") != 0) err(EXIT_FAILURE, "Pivot syscall failed");
-
+    
     // umount old root file system
     if(umount2("oldroot", MNT_DETACH) == -1) err(EXIT_FAILURE, "Unmount of oldroot failed");
     
     // mount proc and dev
     if(mount("proc", "/proc", "proc", 0, NULL) == -1) err(EXIT_FAILURE, "Mount proc");
     if(mount("devtmpfs", "/dev", "devtmpfs", 0, NULL) == -1) err(EXIT_FAILURE, "Mount dev");
-
+    if(mount("sysfs", "/sys", "sysfs", 0, NULL) == -1) err(EXIT_FAILURE, "Mount sys");
+    
+    
     printf("UTS.nodename in chlid : %s\n", crate->uts.nodename);
 
     // get into shell
