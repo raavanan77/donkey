@@ -80,12 +80,10 @@ int main(int argc, string argv[]){
         waitpid(carry.pid, NULL, 0);
         exit(EXIT_SUCCESS);
     }
-    else if(carry.pid > 0){
-        printf("clone returned %jd\n",(intmax_t)carry.pid);
-        sleep(1);
-        if(uname(&carry.uts) == -1) err(EXIT_FAILURE, "unmae");
-        if(waitpid(newspace, NULL, 0) == -1) err(EXIT_FAILURE, "waitpid");
-    }
+    printf("clone returned %jd\n",(intmax_t)carry.pid);
+    sleep(1);
+    if(uname(&carry.uts) == -1) err(EXIT_FAILURE, "unmae");
+    if(waitpid(newspace, NULL, 0) == -1) err(EXIT_FAILURE, "waitpid");
     printf("child is terminated\n");
     exit(EXIT_SUCCESS);
 }
