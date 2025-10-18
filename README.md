@@ -34,6 +34,8 @@ I've tested three images
 - Ubuntu (Unable to use host network interface)
 
 ```bash
+# Run Daemon 
+sudo ./donkeyd
 
 # Add image
 sudo ./donkey image openwrt-general-rootfs-18.06.4-x86-64.tar.gz
