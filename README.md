@@ -19,9 +19,11 @@ Educational project to understand how Docker works under the hood.
 Build the binary with Makefile and please make a folder for crate files at `/var/lib/donkey`
 
 ```bash
-mkdir -p /var/lib/donkey /var/lib/donkey/crate /var/lib/donkey/image
+mkdir -p /var/lib/donkey /var/lib/donkey/crate /var/lib/donkey/image \
+/var/lib/donkey/namespaces /var/lib/donkey/namespaces/ns
 
-make donkey
+make donkeyd # Daemon
+make donkey #client
 ```
 
 Download [openwrt-general-rootfs-18.06.4-x86-64](https://downloads.openwrt.org/releases/18.06.4/targets/x86/64/openwrt-18.06.4-x86-64-generic-rootfs.tar.gz) or any latest rootfs image of your fav distro.
@@ -47,6 +49,15 @@ sudo ./donkey rm owrt
 
 # List crates
 sudo ./donkey ps
+
+# Exec binary
+sudo ./donkey exec owrt /bin/ash
+
+# Stop crate
+sudo ./donkey stop owrt
+
+# Stop daemon
+sudo ./donkey stopd
 ```
 
-P.S: I haven't isolate the network part yet so the crates will use host's network interface.
+hP.S: I haven't isolate the network part yet so the crates will use host's network interface and you have to run applications with absolute path.
