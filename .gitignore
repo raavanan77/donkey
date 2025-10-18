@@ -3,3 +3,5 @@
 .vscode
 *.o
 donkey
+donkeyd
+*.txt
