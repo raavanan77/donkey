@@ -208,18 +208,18 @@ int commandresolver(int argc, struct commands_s *cmd, struct donkey_s *crate_dat
                 syslog(LOG_NOTICE, "Hostname : %s", rdata->hostname);
                 if(polled_fd > 0){
                     syslog(LOG_NOTICE, "crate_prop_path :%s\n overlay :%s", rdata->fs.target, rdata->fs.overlaycat);
-                    return 0;
+                    crate_data->pid = fork();
+                    if(crate_data->pid == 0){
+                        syslog(LOG_NOTICE, "Crate spawning called");
+                        if(cratespawner(crate_data) != 0) errorhandler("Spawning crate failed");
+                        syslog(LOG_NOTICE, "Crate Spawned");
+                        exit(EXIT_SUCCESS);
+                    }
+                    signal(SIGCHLD, SIG_IGN);
+                    //return 0;
                 }
                 fclose(crate_prop_file);
             }
-            crate_data->pid = fork();
-            if(crate_data->pid == 0){
-                syslog(LOG_NOTICE, "Crate spawning called");
-                cratespawner(crate_data);
-                syslog(LOG_NOTICE, "Crate Spawned");
-                exit(EXIT_SUCCESS);
-            }
-            signal(SIGCHLD, SIG_IGN);
             break;
         case RMI:
             break;
@@ -234,7 +234,8 @@ int commandresolver(int argc, struct commands_s *cmd, struct donkey_s *crate_dat
                 }
             }
             syslog(LOG_NOTICE, "Stopping Crate :%s", state->crates[crateidx].cratename);
-            if(kill(state->crates[crateidx].proc, SIGTERM) == 0) {  // This is not suppose to happen fix this
+            syslog(LOG_NOTICE, "Crate PID : %d", state->crates[crateidx].proc);
+            if(kill(state->crates[crateidx].proc, SIGKILL) == 0) {  // This is not suppose to happen fix this
                 char nsd[256];
                 sprintf(nsd, "%sns/%s/pid", NSDIR, state->crates[crateidx].cratename);
                 if(umount(nsd) < 0) syslog(LOG_ERR, "umount %s failed", nsd);
